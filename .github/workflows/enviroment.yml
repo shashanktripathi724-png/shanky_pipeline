@@ -1,351 +1,91 @@
-pool:
-  name: 'AGENT NEXON'
+name: Terraform CI
 
-trigger:
-  branches:
-    include:
-      - master
-      - feature/*
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
 
+permissions:
+  contents: read
 
-stages:
+jobs:
 
-# =========================================================
-# STAGE 1 - TERRAFORM INIT
-# =========================================================
-
-- stage: TerraformInit
-  displayName: 'Terraform Init'
-
-  jobs:
-  - job: Init
-    displayName: 'Terraform Init'
+  # Job 1: Terraform Validation
+  terraform-check:
+    name: Terraform Checks
+    runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - checkout: self
-      displayName: 'Checkout Repository'
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-    - task: TerraformTask@5
-      displayName: 'Terraform Init'
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
 
-        backendAzureRmUseEntraIdForAuthentication: false
-        backendServiceArm: 'Nexon2'
-        backendAzureRmResourceGroupName: 'rg-axion-tfstate'
-        backendAzureRmStorageAccountName: 'staxiontfstate270926'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'Nexon.terraform.tfstate'
+      - name: Terraform Init
+        working-directory: ./Enviroment
+        run: terraform init -backend=false
+
+      - name: Terraform Validate
+        working-directory: ./Enviroment
+        run: terraform validate
 
 
-# =========================================================
-# STAGE 2 - TFLINT
-# =========================================================
-
-- stage: TFLint
-  displayName: 'TFLint'
-
-  dependsOn:
-    - TerraformInit
-
-  condition: succeeded()
-
-  jobs:
-  - job: TFLint
-    displayName: 'Run TFLint'
+  # Job 2: TFLint
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - checkout: self
-      displayName: 'Checkout Repository'
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.64.0
 
-    - powershell: |
-
-        $tflint = "C:\Tools\TFLint\tflint_windows_amd64\tflint.exe"
-
-        Write-Host "======================================"
-        Write-Host "Checking TFLint"
-        Write-Host "======================================"
-
-        if (!(Test-Path $tflint)) {
-          Write-Error "TFLint not found at $tflint"
-          exit 1
-        }
-
-        Write-Host "TFLint Version:"
-        & $tflint --version
-
-        Set-Location "$(System.DefaultWorkingDirectory)\enviroments"
-
-        Write-Host "======================================"
-        Write-Host "Initializing TFLint"
-        Write-Host "======================================"
-
-        & $tflint --init
-
-        if ($LASTEXITCODE -ne 0) {
-          Write-Error "TFLint initialization failed."
-          exit 1
-        }
-
-        Write-Host "======================================"
-        Write-Host "Running TFLint"
-        Write-Host "======================================"
-
-        & $tflint
-
-        if ($LASTEXITCODE -ne 0) {
-          Write-Error "TFLint found issues in Terraform code."
-          exit 1
-        }
-
-        Write-Host "======================================"
-        Write-Host "TFLint completed successfully"
-        Write-Host "======================================"
-
-      displayName: 'Run TFLint'
+      - name: Run TFLint
+        run: tflint --recursive
 
 
-# =========================================================
-# STAGE 3 - TRUFFLEHOG
-# =========================================================
-
-- stage: TruffleHog
-  displayName: 'TruffleHog Secret Scan'
-
-  dependsOn:
-    - TFLint
-
-  condition: succeeded()
-
-  jobs:
-  - job: SecretScan
-    displayName: 'Run TruffleHog'
+  # Job 3: TruffleHog Secret Scanning
+  trufflehog:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - checkout: self
-      displayName: 'Checkout Repository'
-
-    - powershell: |
-
-        $trufflehog = "C:\Tools\TruffleHog\trufflehog.exe"
-
-        Write-Host "======================================"
-        Write-Host "Checking TruffleHog"
-        Write-Host "======================================"
-
-        if (!(Test-Path $trufflehog)) {
-          Write-Error "TruffleHog not found at $trufflehog"
-          exit 1
-        }
-
-        Write-Host "TruffleHog Version:"
-        & $trufflehog --version
-
-        Write-Host "======================================"
-        Write-Host "Running TruffleHog Secret Scan"
-        Write-Host "======================================"
-
-        & $trufflehog filesystem "$(System.DefaultWorkingDirectory)\enviroments" --results=verified,unknown
-
-        if ($LASTEXITCODE -ne 0) {
-          Write-Error "TruffleHog detected potential secrets."
-          exit 1
-        }
-
-        Write-Host "======================================"
-        Write-Host "TruffleHog scan completed successfully"
-        Write-Host "======================================"
-
-      displayName: 'Run TruffleHog'
+      - name: Scan for Secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown
 
 
-# =========================================================
-# STAGE 4 - TERRAFORM VALIDATE
-# =========================================================
-
-- stage: TerraformValidate
-  displayName: 'Terraform Validate'
-
-  dependsOn:
-    - TruffleHog
-
-  condition: succeeded()
-
-  jobs:
-  - job: Validate
-    displayName: 'Terraform Validate'
+  # Job 4: Terraform Security Scan
+  trivy:
+    name: Terraform Security Scan
+    runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - checkout: self
-      displayName: 'Checkout Repository'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Init for Validate'
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-
-        backendAzureRmUseEntraIdForAuthentication: false
-        backendServiceArm: 'Nexon2'
-        backendAzureRmResourceGroupName: 'rg-axion-tfstate'
-        backendAzureRmStorageAccountName: 'staxiontfstate270926'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'Nexon.terraform.tfstate'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Validate'
-      inputs:
-        provider: 'azurerm'
-        command: 'validate'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-
-
-# =========================================================
-# STAGE 5 - TERRAFORM PLAN
-# =========================================================
-
-- stage: TerraformPlan
-  displayName: 'Terraform Plan'
-
-  dependsOn:
-    - TerraformValidate
-
-  condition: succeeded()
-
-  jobs:
-  - job: Plan
-    displayName: 'Terraform Plan'
-
-    steps:
-
-    - checkout: self
-      displayName: 'Checkout Repository'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Init for Plan'
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-
-        backendAzureRmUseEntraIdForAuthentication: false
-        backendServiceArm: 'Nexon2'
-        backendAzureRmResourceGroupName: 'rg-axion-tfstate'
-        backendAzureRmStorageAccountName: 'staxiontfstate270926'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'Nexon.terraform.tfstate'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Plan'
-      inputs:
-        provider: 'azurerm'
-        command: 'plan'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-        environmentServiceNameAzureRM: 'Nexon2'
-        commandOptions: '-out=tfplan'
-
-    - task: PublishPipelineArtifact@1
-      displayName: 'Publish Terraform Plan'
-      inputs:
-        targetPath: '$(System.DefaultWorkingDirectory)/enviroments/tfplan'
-        artifact: 'terraform-plan'
-
-
-# =========================================================
-# STAGE 6 - MANUAL APPROVAL
-# =========================================================
-
-- stage: TerraformApproval
-  displayName: 'Terraform Manual Approval'
-
-  dependsOn:
-    - TerraformPlan
-
-  condition: succeeded()
-
-  jobs:
-  - job: Approval
-    displayName: 'Manual Approval'
-
-    pool:
-      name: server
-
-    timeoutInMinutes: 1440
-
-    steps:
-
-    - task: ManualValidation@1
-      displayName: 'Approve Terraform Deployment'
-
-      timeoutInMinutes: 1440
-
-      inputs:
-        notifyUsers: 'shashank@gmail.com'
-
-        instructions: |
-          Please review the Terraform Plan.
-
-          Check the planned infrastructure changes.
-
-          Approve this validation to continue
-          with Terraform Apply.
-
-        onTimeout: 'reject'
-
-
-# =========================================================
-# STAGE 7 - TERRAFORM APPLY
-# =========================================================
-
-- stage: TerraformApply
-  displayName: 'Terraform Apply'
-
-  dependsOn:
-    - TerraformApproval
-
-  condition: succeeded()
-
-  jobs:
-  - job: Apply
-    displayName: 'Terraform Apply'
-
-    steps:
-
-    - checkout: self
-      displayName: 'Checkout Repository'
-
-    - task: DownloadPipelineArtifact@2
-      displayName: 'Download Terraform Plan'
-      inputs:
-        artifact: 'terraform-plan'
-        path: '$(System.DefaultWorkingDirectory)/enviroments'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Init for Apply'
-      inputs:
-        provider: 'azurerm'
-        command: 'init'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-
-        backendAzureRmUseEntraIdForAuthentication: false
-        backendServiceArm: 'Nexon2'
-        backendAzureRmResourceGroupName: 'rg-axion-tfstate'
-        backendAzureRmStorageAccountName: 'staxiontfstate270926'
-        backendAzureRmContainerName: 'tfstate'
-        backendAzureRmKey: 'Nexon.terraform.tfstate'
-
-    - task: TerraformTask@5
-      displayName: 'Terraform Apply'
-      inputs:
-        provider: 'azurerm'
-        command: 'apply'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/enviroments'
-        environmentServiceNameAzureRM: 'Nexon2'
-        commandOptions: 'tfplan'
+      - name: Scan Terraform Configuration
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          hide-progress: true
