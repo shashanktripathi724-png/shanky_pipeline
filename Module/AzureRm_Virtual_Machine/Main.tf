@@ -1,5 +1,5 @@
 resource "azurerm_network_interface" "nic" {
-    for_each = var.virtual_machine
+  for_each            = var.virtual_machine
   name                = each.value.nic_name
   location            = each.value.location
   resource_group_name = each.value.resource_group_name
@@ -12,7 +12,7 @@ resource "azurerm_network_interface" "nic" {
 }
 
 resource "azurerm_linux_virtual_machine" "virtual_machine" {
-    for_each = var.virtual_machine
+  for_each            = var.virtual_machine
   name                = each.value.vm_name
   resource_group_name = each.value.resource_group_name
   location            = each.value.location
@@ -22,12 +22,12 @@ resource "azurerm_linux_virtual_machine" "virtual_machine" {
     azurerm_network_interface.nic[each.key].id,
   ]
   disable_password_authentication = false
-  admin_password = each.value.admin_password
+  admin_password                  = each.value.admin_password
 
-#   admin_ssh_key {
-#     username   = "adminuser"
-#     public_key = file("C:/Users/hp/.ssh/id_rsa.pub")
-#   }
+  #   admin_ssh_key {
+  #     username   = "adminuser"
+  #     public_key = file("C:/Users/hp/.ssh/id_rsa.pub")
+  #   }
 
   os_disk {
     caching              = "ReadWrite"

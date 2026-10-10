@@ -1,1 +1,1 @@
-variable "RG"{}
+variable "RG" {}
